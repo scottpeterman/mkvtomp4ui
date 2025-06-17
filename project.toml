@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mkv2mp4ui"
+version = "1.0.0"
+authors = [
+    {name = "Scott Peterman", email = "scottpeterman@gmail.com"},
+]
+description = "A PyQt6 GUI application for batch converting MKV files to MP4"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video :: Conversion",
+    "Topic :: Software Development :: User Interfaces",
+    "Environment :: X11 Applications :: Qt",
+]
+keywords = [
+    "mkv", "mp4", "video", "conversion", "ffmpeg", "gui", "pyqt6",
+    "batch", "converter", "multimedia", "video-processing"
+]
+dependencies = [
+    "PyQt6",
+    "ffmpeg-python",
+]
+
+[project.urls]
+Homepage = "https://github.com/scottpeterman/mkvtomp4ui"
+Repository = "https://github.com/scottpeterman/mkvtomp4ui"
+Issues = "https://github.com/scottpeterman/mkvtomp4ui/issues"
+
+[project.scripts]
+mkv2mp4ui = "mkv2mp4ui.main:main"
+
+[project.gui-scripts]
+mkv2mp4ui-gui = "mkv2mp4ui.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mkv2mp4ui*"]
+exclude = ["tests*"]
