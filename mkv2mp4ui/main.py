@@ -10,19 +10,10 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QSettings
 from PyQt6.QtGui import QFont, QIcon
 import ffmpeg
 import subprocess
-
+import shutil
 # Import our FFmpeg downloader utility
-try:
-    from ffmpeg_downloader import check_ffmpeg, FFmpegPromptDialog
-    import shutil
-except ImportError:
-    # Fallback if the module isn't available
-    def check_ffmpeg():
-        import shutil
-        return shutil.which('ffmpeg') is not None
+from mkv2mp4ui.ffmpeg_downloader import check_ffmpeg, FFmpegPromptDialog
 
-
-    FFmpegPromptDialog = None
 
 
 class ConversionWorker(QThread):
@@ -209,9 +200,8 @@ class MKVConverterGUI(QMainWindow):
             self.log("MKV to MP4 Converter ready. Select a folder to begin.")
             return True
         else:
-            import mkv2mp4ui.ffmpeg_downloader as downloader
-            dialog = QDialog()
-            downloader.FFmpegPromptDialog.exec(dialog)
+            self.dialog = QDialog()
+            FFmpegPromptDialog.exec(self.dialog)
             self.log("WARNING: FFmpeg not found! Conversion will not work until FFmpeg is installed.")
             self.log("Please install FFmpeg manually or restart the application to try the download again.")
             return False
@@ -570,42 +560,7 @@ class MKVConverterGUI(QMainWindow):
             QMessageBox.warning(self, "Warning", "No files selected for conversion!")
             return
 
-        # Check if FFmpeg is available
-        if not self.ffmpeg_path:
-            # Try to find FFmpeg again in case it was installed
-            self.ffmpeg_path = self.find_ffmpeg()
 
-            if not self.ffmpeg_path:
-                reply = QMessageBox.question(
-                    self, "FFmpeg Still Not Found",
-                    "FFmpeg is still not found!\n\n"
-                    "Would you like to try the FFmpeg downloader again?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
-
-                if reply == QMessageBox.StandardButton.Yes:
-                    if check_ffmpeg():
-                        # Check_ffmpeg handles the download dialog
-                        new_ffmpeg_path = self.find_ffmpeg()
-                        if new_ffmpeg_path:
-                            self.ffmpeg_path = new_ffmpeg_path
-                            # Continue with conversion since FFmpeg is now available
-                        else:
-                            return  # Still no FFmpeg, abort
-                    else:
-                        return  # User cancelled or failed
-                else:
-                    return  # User doesn't want to download
-
-        # Test FFmpeg
-        try:
-            subprocess.run([self.ffmpeg_path, '-version'], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            QMessageBox.critical(self, "Error",
-                                 f"FFmpeg executable found but not working: {self.ffmpeg_path}\n\n"
-                                 "Please check your FFmpeg installation.")
-            return
 
         # Get codec settings
         codec_settings = {

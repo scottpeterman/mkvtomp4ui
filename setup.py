@@ -23,7 +23,7 @@ def read_requirements():
 
 setup(
     name="mkv2mp4ui",
-    version="1.0.0",
+    version="0.1.0",
     author="Scott Peterman",
     author_email="scottpeterman@gmail.com",  # Update with your email
     description="A PyQt6 GUI application for batch converting MKV files to MP4",
