@@ -40,9 +40,10 @@ setup(
         "Intended Audience :: End Users/Desktop",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Operating System :: Microsoft :: Windows",
+        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.12",
     ],
-    python_requires=">=3.12",
+    python_requires=">=3.10",
     install_requires=read_requirements(),
     entry_points={
         "console_scripts": [

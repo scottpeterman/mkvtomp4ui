@@ -1,54 +1,12 @@
 import sys
-
-
-def show_ffmpeg_download_dialog(self):
-    """Show dialog to download FFmpeg if not found"""
-    if FFmpegPromptDialog is None:
-        # Fallback to simple message if downloader not available
-        reply = QMessageBox.question(
-            self,
-            "FFmpeg Not Found",
-            "FFmpeg is required for video conversion but was not found on your system.\n\n"
-            "Would you like to continue anyway? (You can manually install FFmpeg later)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
-        )
-        return reply == QMessageBox.StandardButton.Yes
-
-    # Use the advanced download dialog
-    dialog = FFmpegPromptDialog(self)
-    # Customize the dialog text for our application
-    dialog.setWindowTitle("FFmpeg Required - MKV to MP4 Converter")
-
-    # Update the explanation text
-    for child in dialog.findChildren(QLabel):
-        if "This application requires FFmpeg" in child.text():
-            child.setText(
-                "This application requires FFmpeg to convert MKV files to MP4. "
-                "FFmpeg was not found on your system."
-            )
-            break
-
-    result = dialog.exec()
-
-    # Re-check for FFmpeg after dialog closes
-    if result == dialog.Accepted:
-        new_ffmpeg_path = self.find_ffmpeg()
-        if new_ffmpeg_path:
-            self.ffmpeg_path = new_ffmpeg_path
-            return True
-
-    return result
-
-
 import os
 import threading
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QLabel, QListWidget, QListWidgetItem,
                              QProgressBar, QTextEdit, QFileDialog, QCheckBox, QGroupBox,
-                             QSpinBox, QComboBox, QMessageBox, QSplitter)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer
+                             QSpinBox, QComboBox, QMessageBox, QSplitter, QDialog)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer, QSettings
 from PyQt6.QtGui import QFont, QIcon
 import ffmpeg
 import subprocess
@@ -56,10 +14,12 @@ import subprocess
 # Import our FFmpeg downloader utility
 try:
     from ffmpeg_downloader import check_ffmpeg, FFmpegPromptDialog
+    import shutil
 except ImportError:
     # Fallback if the module isn't available
     def check_ffmpeg():
-        return True
+        import shutil
+        return shutil.which('ffmpeg') is not None
 
 
     FFmpegPromptDialog = None
@@ -168,8 +128,21 @@ class MKVConverterGUI(QMainWindow):
         super().__init__()
         self.mkv_files = []
         self.conversion_worker = None
-        self.ffmpeg_path = self.find_ffmpeg()
+        self.ffmpeg_path = None
+        self.output_folder = None
+        self.total_duration_seconds = None  # Store total duration for ETA calculation
+
+        # Initialize QSettings for persistent configuration
+        self.settings = QSettings("MKVConverter", "MKVtoMP4")
+
+        # Initialize UI first
         self.initUI()
+
+        # Load saved settings
+        self.load_settings()
+
+        # Then check for FFmpeg and offer to download if needed
+        self.check_and_setup_ffmpeg()
 
     def find_ffmpeg(self):
         """Find FFmpeg executable, prioritizing local installation"""
@@ -208,6 +181,137 @@ class MKVConverterGUI(QMainWindow):
 
         return None
 
+    def check_and_setup_ffmpeg(self):
+        """Check for FFmpeg and handle download if needed"""
+        # Use the check_ffmpeg function from ffmpeg_downloader module
+        if check_ffmpeg():
+            # FFmpeg is available, find the path
+            self.ffmpeg_path = self.find_ffmpeg()
+            if self.ffmpeg_path:
+                self.log(f"FFmpeg found: {self.ffmpeg_path}")
+                self.log("MKV to MP4 Converter ready. Select a folder to begin.")
+                return True
+            else:
+                # This shouldn't happen if check_ffmpeg returned True, but just in case
+                self.log("FFmpeg reported as available but path not found. Trying system PATH...")
+                import shutil
+                system_ffmpeg = shutil.which('ffmpeg')
+                if system_ffmpeg:
+                    self.ffmpeg_path = system_ffmpeg
+                    self.log(f"FFmpeg found in system PATH: {self.ffmpeg_path}")
+                    self.log("MKV to MP4 Converter ready. Select a folder to begin.")
+                    return True
+
+        # If we get here, check_ffmpeg either showed the dialog or FFmpeg is still not available
+        self.ffmpeg_path = self.find_ffmpeg()
+        if self.ffmpeg_path:
+            self.log(f"FFmpeg successfully installed: {self.ffmpeg_path}")
+            self.log("MKV to MP4 Converter ready. Select a folder to begin.")
+            return True
+        else:
+            import mkv2mp4ui.ffmpeg_downloader as downloader
+            dialog = QDialog()
+            downloader.FFmpegPromptDialog.exec(dialog)
+            self.log("WARNING: FFmpeg not found! Conversion will not work until FFmpeg is installed.")
+            self.log("Please install FFmpeg manually or restart the application to try the download again.")
+            return False
+
+    def load_settings(self):
+        """Load saved settings from QSettings"""
+        # Load conversion settings
+        video_codec = self.settings.value("video_codec", "libx264")
+        audio_codec = self.settings.value("audio_codec", "aac")
+        crf_value = self.settings.value("crf", 23, type=int)
+        preset = self.settings.value("preset", "medium")
+
+        # Apply saved settings to UI components
+        video_index = self.video_codec_combo.findText(video_codec)
+        if video_index >= 0:
+            self.video_codec_combo.setCurrentIndex(video_index)
+
+        audio_index = self.audio_codec_combo.findText(audio_codec)
+        if audio_index >= 0:
+            self.audio_codec_combo.setCurrentIndex(audio_index)
+
+        self.crf_spinbox.setValue(crf_value)
+
+        preset_index = self.preset_combo.findText(preset)
+        if preset_index >= 0:
+            self.preset_combo.setCurrentIndex(preset_index)
+
+        # Load window geometry and state
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        window_state = self.settings.value("windowState")
+        if window_state:
+            self.restoreState(window_state)
+
+        # Load last used folders
+        last_source_folder = self.settings.value("last_source_folder", "")
+        if last_source_folder and os.path.exists(last_source_folder):
+            self.selected_folder_label.setText(last_source_folder)
+            self.selected_folder_label.setStyleSheet("color: #d9a109; background-color: transparent; padding: 2px;")
+            # Actually scan for MKV files in the saved folder
+            self.scan_for_mkv_files(last_source_folder)
+
+        last_output_folder = self.settings.value("last_output_folder", "")
+        if last_output_folder and os.path.exists(last_output_folder):
+            self.output_folder = last_output_folder
+            self.output_folder_label.setText(last_output_folder)
+            self.output_folder_label.setStyleSheet("color: #d9a109; background-color: transparent; padding: 2px;")
+
+        self.log("Settings loaded from previous session")
+
+    def save_settings(self):
+        """Save current settings to QSettings"""
+        # Save conversion settings
+        self.settings.setValue("video_codec", self.video_codec_combo.currentText())
+        self.settings.setValue("audio_codec", self.audio_codec_combo.currentText())
+        self.settings.setValue("crf", self.crf_spinbox.value())
+        self.settings.setValue("preset", self.preset_combo.currentText())
+
+        # Save window geometry and state
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+
+        # Save last used folders
+        if self.selected_folder_label.text() != "No folder selected":
+            self.settings.setValue("last_source_folder", self.selected_folder_label.text())
+
+        if self.output_folder:
+            self.settings.setValue("last_output_folder", self.output_folder)
+
+        # Ensure settings are written to disk
+        self.settings.sync()
+
+    def closeEvent(self, event):
+        """Override closeEvent to save settings before closing"""
+        # Stop any running conversion
+        if self.conversion_worker and self.conversion_worker.isRunning():
+            reply = QMessageBox.question(
+                self, "Conversion in Progress",
+                "A conversion is currently running. Do you want to stop it and exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.stop_conversion()
+                # Wait a moment for the worker to stop
+                if self.conversion_worker:
+                    self.conversion_worker.wait(3000)  # Wait up to 3 seconds
+            else:
+                event.ignore()
+                return
+
+        # Save settings before closing
+        self.save_settings()
+        self.log("Settings saved")
+
+        # Accept the close event
+        event.accept()
+
     def initUI(self):
         self.setWindowTitle("MKV to MP4 Batch Converter")
         self.setGeometry(100, 100, 900, 700)
@@ -233,7 +337,7 @@ class MKVConverterGUI(QMainWindow):
         self.select_folder_btn = QPushButton("Select Folder with MKV Files")
         self.select_folder_btn.clicked.connect(self.select_folder)
         self.selected_folder_label = QLabel("No folder selected")
-        self.selected_folder_label.setStyleSheet("color: gray;")
+        self.selected_folder_label.setStyleSheet("color: #888; background-color: transparent; padding: 2px;")
 
         folder_button_layout.addWidget(self.select_folder_btn)
         folder_button_layout.addWidget(self.selected_folder_label, 1)
@@ -244,7 +348,7 @@ class MKVConverterGUI(QMainWindow):
         self.select_output_btn = QPushButton("Select Output Folder")
         self.select_output_btn.clicked.connect(self.select_output_folder)
         self.output_folder_label = QLabel("Same as source folder")
-        self.output_folder_label.setStyleSheet("color: gray;")
+        self.output_folder_label.setStyleSheet("color: #888; background-color: transparent; padding: 2px;")
 
         output_layout.addWidget(self.select_output_btn)
         output_layout.addWidget(self.output_folder_label, 1)
@@ -260,12 +364,16 @@ class MKVConverterGUI(QMainWindow):
         settings_layout.addWidget(QLabel("Video Codec:"))
         self.video_codec_combo = QComboBox()
         self.video_codec_combo.addItems(["libx264", "libx265", "copy"])
+        # Connect to save settings when changed
+        self.video_codec_combo.currentTextChanged.connect(self.on_settings_changed)
         settings_layout.addWidget(self.video_codec_combo)
 
         # Audio codec
         settings_layout.addWidget(QLabel("Audio Codec:"))
         self.audio_codec_combo = QComboBox()
         self.audio_codec_combo.addItems(["aac", "mp3", "copy"])
+        # Connect to save settings when changed
+        self.audio_codec_combo.currentTextChanged.connect(self.on_settings_changed)
         settings_layout.addWidget(self.audio_codec_combo)
 
         # Quality (CRF)
@@ -274,12 +382,16 @@ class MKVConverterGUI(QMainWindow):
         self.crf_spinbox.setRange(0, 51)
         self.crf_spinbox.setValue(23)
         self.crf_spinbox.setToolTip("Lower values = better quality, larger files (18-28 recommended)")
+        # Connect to save settings when changed
+        self.crf_spinbox.valueChanged.connect(self.on_settings_changed)
         settings_layout.addWidget(self.crf_spinbox)
 
         # Preset
         settings_layout.addWidget(QLabel("Preset:"))
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(["medium", "fast", "faster", "veryfast", "slow", "slower"])
+        # Connect to save settings when changed
+        self.preset_combo.currentTextChanged.connect(self.on_settings_changed)
         settings_layout.addWidget(self.preset_combo)
 
         settings_layout.addStretch()
@@ -302,6 +414,8 @@ class MKVConverterGUI(QMainWindow):
 
         self.file_list = QListWidget()
         self.file_list.setMinimumHeight(150)
+        # Connect itemChanged signal to update button state when checkboxes change
+        self.file_list.itemChanged.connect(self.update_file_count)
         files_layout.addWidget(self.file_list)
 
         top_layout.addWidget(files_group)
@@ -322,7 +436,7 @@ class MKVConverterGUI(QMainWindow):
         self.stop_btn.setEnabled(False)
 
         self.progress_bar = QProgressBar()
-        self.progress_label = QLabel("Ready")
+        self.progress_label = QLabel("Initializing...")
 
         controls_layout.addWidget(self.convert_btn)
         controls_layout.addWidget(self.stop_btn)
@@ -348,38 +462,55 @@ class MKVConverterGUI(QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 1)
 
-        self.output_folder = None
-        self.total_duration_seconds = None  # Store total duration for ETA calculation
+    def on_settings_changed(self):
+        """Called when any setting is changed - saves settings immediately"""
+        # Use a timer to debounce rapid changes (like spinning through CRF values)
+        if not hasattr(self, 'settings_timer'):
+            self.settings_timer = QTimer()
+            self.settings_timer.setSingleShot(True)
+            self.settings_timer.timeout.connect(self.save_settings)
 
-        # Check for FFmpeg and offer to download if not found
-        if not self.ffmpeg_path:
-            self.show_ffmpeg_download_dialog()
-
-        # Display FFmpeg status
-        if self.ffmpeg_path:
-            self.log(f"FFmpeg found: {self.ffmpeg_path}")
-        else:
-            self.log("WARNING: FFmpeg not found! Some features may not work.")
-
-        self.log("MKV to MP4 Converter ready. Select a folder to begin.")
+        # Reset the timer - this debounces rapid changes
+        self.settings_timer.start(500)  # Save after 500ms of no changes
 
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select folder containing MKV files")
+        # Start from the last used folder if available
+        start_dir = self.settings.value("last_source_folder", "")
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder containing MKV files",
+            start_dir
+        )
         if folder:
             self.selected_folder_label.setText(folder)
-            self.selected_folder_label.setStyleSheet("color: black;")
+            self.selected_folder_label.setStyleSheet("color: #d9a109; background-color: transparent; padding: 2px;")
             self.scan_for_mkv_files(folder)
+            # Save the folder selection immediately
+            self.settings.setValue("last_source_folder", folder)
 
     def select_output_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select output folder for MP4 files")
+        # Start from the last used output folder if available
+        start_dir = self.settings.value("last_output_folder", "")
+        if not start_dir:
+            # Fall back to the source folder if no output folder was previously set
+            start_dir = self.settings.value("last_source_folder", "")
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select output folder for MP4 files",
+            start_dir
+        )
         if folder:
             self.output_folder = folder
             self.output_folder_label.setText(folder)
-            self.output_folder_label.setStyleSheet("color: black;")
+            self.output_folder_label.setStyleSheet("color: #d9a109; background-color: transparent; padding: 2px;")
+            # Save the output folder selection immediately
+            self.settings.setValue("last_output_folder", folder)
         else:
             self.output_folder = None
             self.output_folder_label.setText("Same as source folder")
-            self.output_folder_label.setStyleSheet("color: gray;")
+            self.output_folder_label.setStyleSheet("color: #888; background-color: transparent; padding: 2px;")
 
     def scan_for_mkv_files(self, folder):
         self.mkv_files = []
@@ -406,7 +537,7 @@ class MKVConverterGUI(QMainWindow):
                        if self.file_list.item(i).checkState() == Qt.CheckState.Checked)
 
         self.file_count_label.setText(f"{selected}/{total} files selected")
-        self.convert_btn.setEnabled(selected > 0)
+        self.convert_btn.setEnabled(selected > 0 and self.ffmpeg_path is not None)
 
     def toggle_select_all(self):
         check_state = Qt.CheckState.Checked if self.select_all_cb.isChecked() else Qt.CheckState.Unchecked
@@ -441,11 +572,31 @@ class MKVConverterGUI(QMainWindow):
 
         # Check if FFmpeg is available
         if not self.ffmpeg_path:
-            QMessageBox.critical(self, "Error",
-                                 "FFmpeg not found!\n\n"
-                                 "Please ensure ffmpeg.exe is in your project directory, "
-                                 "or install FFmpeg and add it to your system PATH.")
-            return
+            # Try to find FFmpeg again in case it was installed
+            self.ffmpeg_path = self.find_ffmpeg()
+
+            if not self.ffmpeg_path:
+                reply = QMessageBox.question(
+                    self, "FFmpeg Still Not Found",
+                    "FFmpeg is still not found!\n\n"
+                    "Would you like to try the FFmpeg downloader again?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+
+                if reply == QMessageBox.StandardButton.Yes:
+                    if check_ffmpeg():
+                        # Check_ffmpeg handles the download dialog
+                        new_ffmpeg_path = self.find_ffmpeg()
+                        if new_ffmpeg_path:
+                            self.ffmpeg_path = new_ffmpeg_path
+                            # Continue with conversion since FFmpeg is now available
+                        else:
+                            return  # Still no FFmpeg, abort
+                    else:
+                        return  # User cancelled or failed
+                else:
+                    return  # User doesn't want to download
 
         # Test FFmpeg
         try:
@@ -588,6 +739,10 @@ class MKVConverterGUI(QMainWindow):
 def main():
     app = QApplication(sys.argv)
 
+    # Set application properties for QSettings
+    app.setOrganizationName("MKVConverter")
+    app.setApplicationName("MKVtoMP4")
+
     # Check if ffmpeg-python is installed
     try:
         import ffmpeg
@@ -597,20 +752,8 @@ def main():
                              "Please install it with:\npip install ffmpeg-python")
         sys.exit(1)
 
-    # Check for FFmpeg installation before creating the main window
-    # This gives users a chance to download FFmpeg before the app starts
-    if not check_ffmpeg():
-        reply = QMessageBox.question(
-            None,
-            "Continue Without FFmpeg?",
-            "FFmpeg was not found or installed. The application may not work properly.\n\n"
-            "Do you want to continue anyway?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.No:
-            sys.exit(0)
-
+    # Create and show the main window
+    # FFmpeg checking is now handled within the main window initialization
     window = MKVConverterGUI()
     window.show()
 
