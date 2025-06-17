@@ -2,7 +2,7 @@
 
 A modern, user-friendly PyQt6 GUI application for batch converting MKV video files to MP4 format using FFmpeg. Perfect for converting movie collections ripped with MakeMKV or HandBrake into a more universally compatible format.
 
-![MKV to MP4 Converter Screenshot](https://raw.githubusercontent.com/scottpeterman/mkvtomp4ui/screenshots/app_screenshot.png)
+![MKV to MP4 Converter Screenshot](https://raw.githubusercontent.com/scottpeterman/mkvtomp4ui/refs/heads/main/screenshots/app_screenshot.png)
 
 ## Features
 
